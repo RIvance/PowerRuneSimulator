@@ -83,6 +83,11 @@ class Geometry
         }
     }
 
+    void addLine(const GeometryLine & line)
+    {
+        this->lines.emplace_back(line);
+    }
+
     Vector<GraphicLine> getGraphic(cv::Size imageSize)
     {
         Vector<GraphicLine> graphicLines;
@@ -92,6 +97,8 @@ class Geometry
         return graphicLines;
     }
 
+    Geometry() = default;
+
     explicit Geometry(Vector<GeometryLine> lines)
         : lines(std::move(lines))
     { /* empty */ }
@@ -99,10 +106,11 @@ class Geometry
 
 enum LightBlobLabel
 {
-    LIGHT_BLOB_ARMOR_HORIZONTAL = 0,
-    LIGHT_BLOB_ARMOR_VERTICAL   = 1,
-    LIGHT_BLOB_ARM_STICK        = 2,
-    LIGHT_BLOB_OUTSIDE          = 3,
+    LIGHT_BLOB_MASK             = 0,
+    LIGHT_BLOB_ARMOR_HORIZONTAL = 1,
+    LIGHT_BLOB_ARMOR_VERTICAL   = 2,
+    LIGHT_BLOB_ARM_STICK        = 3,
+    LIGHT_BLOB_OUTSIDE          = 4,
 };
 
 class PowerRuneArm
@@ -119,11 +127,11 @@ class PowerRuneArm
   private:
 
     const Geometry geometry = Geometry({
+        GeometryLine(0, 20, 0, 66,      LIGHT_BLOB_ARM_STICK),
         GeometryLine(-13, 85, 13, 85,   LIGHT_BLOB_ARMOR_HORIZONTAL),
         GeometryLine(-14, 68, 14, 68,   LIGHT_BLOB_ARMOR_HORIZONTAL),
         GeometryLine(-13, 85, -14, 68,  LIGHT_BLOB_ARMOR_VERTICAL),
         GeometryLine(13, 85, 14, 68,    LIGHT_BLOB_ARMOR_VERTICAL),
-        GeometryLine(0, 20, 0, 66,      LIGHT_BLOB_ARM_STICK),
         GeometryLine(-6, 18, 6, 18,     LIGHT_BLOB_OUTSIDE),  // `_`
         GeometryLine(6, 18, 16, 31,     LIGHT_BLOB_OUTSIDE),  // `/`
         GeometryLine(-6, 18, -16, 31,   LIGHT_BLOB_OUTSIDE),  // `\`
@@ -132,19 +140,21 @@ class PowerRuneArm
     });
 
     State state = DEACTIVATED;
+    Timestamp createdTime = SysClock::now();
+
+    static double maskYOffset(double t)
+    {
+        t *= 2;
+        return 6 * (t - floor(t));
+    }
 
   public:
 
     int id = 0;
 
-    bool isDeactivated() const
+    State activateState() const
     {
-        return state == DEACTIVATED;
-    }
-
-    bool isActivated() const
-    {
-        return state == ACTIVATED;
+        return this->state;
     }
 
     void light()
@@ -162,11 +172,34 @@ class PowerRuneArm
         state = DEACTIVATED;
     }
 
+    Geometry getStickMask(double angle = 0, double scale = 1) const
+    {
+        double t = Duration<double>(SysClock::now() - createdTime).count();
+        double offset = maskYOffset(t);
+        GeometryLine lineLeft = GeometryLine(0, 6 + offset, -6, 0 + offset, LIGHT_BLOB_MASK);
+        GeometryLine lineRight = GeometryLine(0, 6 + offset, 6, 0 + offset, LIGHT_BLOB_MASK);
+
+        Geometry mask;
+
+        for (int i = 0; i < 10; i++) {
+            lineLeft.p1(1)  += 6;
+            lineLeft.p2(1)  += 6;
+            lineRight.p1(1) += 6;
+            lineRight.p2(1) += 6;
+            mask.addLine(lineLeft);
+            mask.addLine(lineRight);
+        }
+
+        mask.rotate(this->id * CV_PI * (2.0 / 5.0) + angle);
+        mask.scale(scale);
+
+        return mask;
+    }
+
     Geometry getGeometry(double angle = 0, double scale = 1) const
     {
-        double rotateAngle = this->id * CV_PI * (2.0 / 5.0) + angle;
         Geometry geo = this->geometry;
-        geo.rotate(rotateAngle);
+        geo.rotate(this->id * CV_PI * (2.0 / 5.0) + angle);
         geo.scale(scale);
         return geo;
     }
@@ -232,10 +265,19 @@ class PowerRune
     double scale = 3;
     ClockSin clockSin;
     Color color;
+    double bloomFactor = 1.4;
 
-    double next()
+    void next()
     {
         this->angle += clockSin.integral();
+    }
+
+    cv::Mat bloom(const cv::Mat & src) const
+    {
+        cv::Mat gaussian, image;
+        cv::GaussianBlur(src, image, cv::Size(3, 3), 1);
+        cv::GaussianBlur(image, gaussian, cv::Size(33, 33), 8);
+        return image + gaussian * bloomFactor;
     }
 
   public:
@@ -252,32 +294,38 @@ class PowerRune
             for (GraphicLine line : geo.getGraphic(image.size())) {
                 switch (line.label) {
                     case LIGHT_BLOB_ARMOR_HORIZONTAL: {
-                        if (!arm.isDeactivated()) {
+                        if (arm.activateState() != PowerRuneArm::DEACTIVATED) {
                             cv::line(image, line.p1, line.p2, rgbColor, 4, cv::LINE_AA);
                         }
                     } break;
 
                     case LIGHT_BLOB_ARMOR_VERTICAL: {
-                        if (!arm.isDeactivated()) {
+                        if (arm.activateState() != PowerRuneArm::DEACTIVATED) {
                             cv::line(image, line.p1, line.p2, rgbColor, 3, cv::LINE_AA);
                         }
                     } break;
 
                     case LIGHT_BLOB_ARM_STICK: {
-                        if (!arm.isDeactivated()) {
-                            cv::line(image, line.p1, line.p2, rgbColor, 10, cv::LINE_AA);
+                        if (arm.activateState() == PowerRuneArm::ACTIVATED) {
+                            cv::line(image, line.p1, line.p2, rgbColor, 12, cv::LINE_AA);
+                        } else if (arm.activateState() == PowerRuneArm::ACTIVATING) {
+                            cv::line(image, line.p1, line.p2, rgbColor, 12, cv::LINE_AA);
+                            for (GraphicLine & mask : arm.getStickMask(this->angle, this->scale).getGraphic(imageSize)) {
+                                const cv::Scalar BLACK(0, 0, 0);
+                                cv::line(image, mask.p1, mask.p2, BLACK, 6, cv::LINE_AA);
+                            }
                         }
                     } break;
 
                     case LIGHT_BLOB_OUTSIDE: {
-                        if (arm.isActivated()) {
+                        if (arm.activateState() == PowerRuneArm::ACTIVATED) {
                             cv::line(image, line.p1, line.p2, rgbColor, 2, cv::LINE_AA);
                         }
                     } break;
                 }
             }
         }
-        return image;
+        return bloom(image);
     }
 
     void switchColor()
@@ -287,6 +335,11 @@ class PowerRune
         } else {
             this->color = RED;
         }
+    }
+
+    void setBloom(double factor)
+    {
+        this->bloomFactor = factor;
     }
 
     void setSin_A(double value)
@@ -336,16 +389,6 @@ class PowerRune
 
 };
 
-double bloomFactor = 1.2;
-
-cv::Mat bloom(const cv::Mat & src)
-{
-    cv::Mat gaussian, image;
-    cv::GaussianBlur(src, image, cv::Size(3, 3), 1);
-    cv::GaussianBlur(image, gaussian, cv::Size(33, 33), 8);
-    return image + gaussian * bloomFactor;
-}
-
 PowerRune powerRune(0, 0, -2, RED);
 
 void onMouseClick(int event, int, int, int, void*)
@@ -362,7 +405,7 @@ void onColorChange(int, void*)
 
 void onBloomChange(int value, void*)
 {
-    bloomFactor = 0.5 + value / 25.0;
+    powerRune.setBloom(0.5 + value / 25.0);
 }
 
 void onSpeedChange(int value, void*)
@@ -396,8 +439,7 @@ int main()
 {
     initializeWindow();
     while (true) {
-        cv::Mat frame = powerRune.renderImage();
-        cv::imshow("PowerRune", bloom(frame));
+        cv::imshow("PowerRune", powerRune.renderImage());
         cv::waitKey(1);
     }
 }
