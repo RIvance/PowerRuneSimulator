@@ -245,7 +245,7 @@ class PowerRune
         this->next();
         auto imageSize = cv::Size((int) (scale * 200), (int) (scale * 200));
         cv::Mat image = cv::Mat::zeros(imageSize, CV_8UC3);
-        cv::Scalar rgbColor = this->color == RED ? cv::Scalar(0, 0, 255) : cv::Scalar(255, 0, 0);
+        cv::Scalar rgbColor = this->color == RED ? cv::Scalar(50, 70, 255) : cv::Scalar(255, 70, 50);
 
         for (const auto & arm : arms) {
             auto geo = arm.getGeometry(this->angle, this->scale);
@@ -328,9 +328,10 @@ class PowerRune
     {
         for (int i = 0; i < 5; i++) {
             arms[i].id = i;
+            arms[i].activate();
         }
         std::shuffle(activeOrder, activeOrder + 5, mt);
-        arms[activeOrder[activating]].light();
+        activating = 6;
     }
 
 };
@@ -341,11 +342,11 @@ cv::Mat bloom(const cv::Mat & src)
 {
     cv::Mat gaussian, image;
     cv::GaussianBlur(src, image, cv::Size(3, 3), 1);
-    cv::GaussianBlur(image, gaussian, cv::Size(33, 33), 10);
+    cv::GaussianBlur(image, gaussian, cv::Size(33, 33), 8);
     return image + gaussian * bloomFactor;
 }
 
-PowerRune powerRune(0, 0, -5, RED);
+PowerRune powerRune(0, 0, -2, RED);
 
 void onMouseClick(int event, int, int, int, void*)
 {
@@ -361,22 +362,22 @@ void onColorChange(int, void*)
 
 void onBloomChange(int value, void*)
 {
-    bloomFactor = 0.5 + value / 50.0;
+    bloomFactor = 0.5 + value / 25.0;
 }
 
 void onSpeedChange(int value, void*)
 {
-    powerRune.setSin_A(value / 200.0);
+    powerRune.setSin_A(value / 20.0);
 }
 
 void onIntervalChange(int value, void*)
 {
-    powerRune.setSin_w(value / 200.0);
+    powerRune.setSin_w(value / 20.0);
 }
 
 void onSpeedOffsetChange(int value, void*)
 {
-    powerRune.setSin_b(value / 100.0 - 5);
+    powerRune.setSin_b(value / 10.0 - 5);
 }
 
 void initializeWindow()
@@ -384,10 +385,10 @@ void initializeWindow()
     cv::namedWindow("PowerRune");
     cv::setMouseCallback("PowerRune", onMouseClick);
     cv::createTrackbar("color", "PowerRune", nullptr, 1, onColorChange);
-    cv::createTrackbar("bloom", "PowerRune", nullptr, 100, onBloomChange);
-    cv::createTrackbar("speed", "PowerRune", nullptr, 1000, onSpeedChange);
-    cv::createTrackbar("interval", "PowerRune", nullptr, 1000, onIntervalChange);
-    cv::createTrackbar("soffset", "PowerRune", nullptr, 1000, onSpeedOffsetChange);
+    cv::createTrackbar("brightness", "PowerRune", nullptr, 100, onBloomChange);
+    cv::createTrackbar("speed", "PowerRune", nullptr, 100, onSpeedChange);
+    cv::createTrackbar("interval", "PowerRune", nullptr, 100, onIntervalChange);
+    cv::createTrackbar("soffset", "PowerRune", nullptr, 100, onSpeedOffsetChange);
 }
 
 [[noreturn]]
