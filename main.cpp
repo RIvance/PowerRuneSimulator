@@ -21,7 +21,7 @@ struct GeometryLine
     Eigen::Vector2d p1, p2;
     int label = 0;
 
-    GraphicLine graphic(cv::Size imageSize) const
+    GraphicLine graphic(const cv::Size & imageSize) const
     {
         return {
             cv::Point(
@@ -88,7 +88,7 @@ class Geometry
         this->lines.emplace_back(line);
     }
 
-    Vector<GraphicLine> getGraphic(cv::Size imageSize)
+    Vector<GraphicLine> getGraphic(const cv::Size & imageSize) const
     {
         Vector<GraphicLine> graphicLines;
         for (const GeometryLine & line : lines) {
@@ -176,8 +176,8 @@ class PowerRuneArm
     {
         double t = Duration<double>(SysClock::now() - createdTime).count();
         double offset = maskYOffset(t);
-        GeometryLine lineLeft = GeometryLine(0, 6 + offset, -6, 0 + offset, LIGHT_BLOB_MASK);
-        GeometryLine lineRight = GeometryLine(0, 6 + offset, 6, 0 + offset, LIGHT_BLOB_MASK);
+        GeometryLine lineLeft  = GeometryLine(0, 6 + offset, -6, 0 + offset, LIGHT_BLOB_MASK);
+        GeometryLine lineRight = GeometryLine(0, 6 + offset,  6, 0 + offset, LIGHT_BLOB_MASK);
 
         Geometry mask;
 
@@ -276,7 +276,9 @@ class PowerRune
     {
         cv::Mat gaussian, image;
         cv::GaussianBlur(src, image, cv::Size(3, 3), 1);
-        cv::GaussianBlur(image, gaussian, cv::Size(33, 33), 8);
+        int gaussianKernelSize = (int) (9.0 * scale);
+        gaussianKernelSize += gaussianKernelSize % 2 == 0 ? 1 : 0;
+        cv::GaussianBlur(image, gaussian, cv::Size(gaussianKernelSize, gaussianKernelSize), 8);
         return image + gaussian * bloomFactor;
     }
 
@@ -291,35 +293,35 @@ class PowerRune
 
         for (const auto & arm : arms) {
             auto geo = arm.getGeometry(this->angle, this->scale);
-            for (GraphicLine line : geo.getGraphic(image.size())) {
+            for (const GraphicLine & line : geo.getGraphic(image.size())) {
                 switch (line.label) {
                     case LIGHT_BLOB_ARMOR_HORIZONTAL: {
                         if (arm.activateState() != PowerRuneArm::DEACTIVATED) {
-                            cv::line(image, line.p1, line.p2, rgbColor, 4, cv::LINE_AA);
+                            cv::line(image, line.p1, line.p2, rgbColor, scale * 2, cv::LINE_AA);
                         }
                     } break;
 
                     case LIGHT_BLOB_ARMOR_VERTICAL: {
                         if (arm.activateState() != PowerRuneArm::DEACTIVATED) {
-                            cv::line(image, line.p1, line.p2, rgbColor, 3, cv::LINE_AA);
+                            cv::line(image, line.p1, line.p2, rgbColor, scale * 1.5, cv::LINE_AA);
                         }
                     } break;
 
                     case LIGHT_BLOB_ARM_STICK: {
                         if (arm.activateState() == PowerRuneArm::ACTIVATED) {
-                            cv::line(image, line.p1, line.p2, rgbColor, 12, cv::LINE_AA);
+                            cv::line(image, line.p1, line.p2, rgbColor, scale * 4, cv::LINE_AA);
                         } else if (arm.activateState() == PowerRuneArm::ACTIVATING) {
-                            cv::line(image, line.p1, line.p2, rgbColor, 12, cv::LINE_AA);
+                            cv::line(image, line.p1, line.p2, rgbColor, scale * 4, cv::LINE_AA);
                             for (GraphicLine & mask : arm.getStickMask(this->angle, this->scale).getGraphic(imageSize)) {
                                 const cv::Scalar BLACK(0, 0, 0);
-                                cv::line(image, mask.p1, mask.p2, BLACK, 6, cv::LINE_AA);
+                                cv::line(image, mask.p1, mask.p2, BLACK, scale * 2.4, cv::LINE_AA);
                             }
                         }
                     } break;
 
                     case LIGHT_BLOB_OUTSIDE: {
                         if (arm.activateState() == PowerRuneArm::ACTIVATED) {
-                            cv::line(image, line.p1, line.p2, rgbColor, 2, cv::LINE_AA);
+                            cv::line(image, line.p1, line.p2, rgbColor, scale * 1, cv::LINE_AA);
                         }
                     } break;
                 }
@@ -340,6 +342,11 @@ class PowerRune
     void setBloom(double factor)
     {
         this->bloomFactor = factor;
+    }
+
+    void setScale(double value)
+    {
+        this->scale = value;
     }
 
     void setSin_A(double value)
@@ -389,7 +396,7 @@ class PowerRune
 
 };
 
-PowerRune powerRune(0, 0, -2, RED);
+PowerRune powerRune(0.785, 1.884, 1.305, RED);
 
 void onMouseClick(int event, int, int, int, void*)
 {
@@ -408,30 +415,30 @@ void onBloomChange(int value, void*)
     powerRune.setBloom(0.5 + value / 25.0);
 }
 
-void onSpeedChange(int value, void*)
+void onSizeChange(int value, void*)
 {
-    powerRune.setSin_A(value / 20.0);
+    powerRune.setScale(value * 0.1 + 1);
 }
 
-void onIntervalChange(int value, void*)
-{
-    powerRune.setSin_w(value / 20.0);
-}
 
-void onSpeedOffsetChange(int value, void*)
-{
-    powerRune.setSin_b(value / 10.0 - 5);
-}
+#define WIN_NAME "PowerRune :: A sin(wt + b)"
+#define SIN_TRACKBAR(var_, expr_)                                                       \
+    cv::createTrackbar(#var_" "#expr_, WIN_NAME, nullptr, 100, [](int (var_), void*) {  \
+        powerRune.setSin_##var_ (var_ expr_);                                           \
+    })                                                                                  \
 
 void initializeWindow()
 {
-    cv::namedWindow("PowerRune");
-    cv::setMouseCallback("PowerRune", onMouseClick);
-    cv::createTrackbar("color", "PowerRune", nullptr, 1, onColorChange);
-    cv::createTrackbar("brightness", "PowerRune", nullptr, 100, onBloomChange);
-    cv::createTrackbar("speed", "PowerRune", nullptr, 100, onSpeedChange);
-    cv::createTrackbar("interval", "PowerRune", nullptr, 100, onIntervalChange);
-    cv::createTrackbar("soffset", "PowerRune", nullptr, 100, onSpeedOffsetChange);
+    cv::namedWindow(WIN_NAME);
+    cv::setMouseCallback(WIN_NAME, onMouseClick);
+
+    SIN_TRACKBAR(A, * 0.05);
+    SIN_TRACKBAR(w, * 0.05);
+    SIN_TRACKBAR(b, * 0.1 - 5);
+
+    cv::createTrackbar("color", WIN_NAME, nullptr, 1, onColorChange);
+    cv::createTrackbar("brightness", WIN_NAME, nullptr, 100, onBloomChange);
+    cv::createTrackbar("size", WIN_NAME, nullptr, 300, onSizeChange);
 }
 
 [[noreturn]]
@@ -439,7 +446,7 @@ int main()
 {
     initializeWindow();
     while (true) {
-        cv::imshow("PowerRune", powerRune.renderImage());
+        cv::imshow(WIN_NAME, powerRune.renderImage());
         cv::waitKey(1);
     }
 }
