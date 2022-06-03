@@ -1,7 +1,7 @@
 # Power Rune Simulator
 
 ![](assets/powerrune.gif)
-![](assets/powerrune_window.jpg)
+![](assets/powerrune_window.png)
 
 ## Dependencies
 
